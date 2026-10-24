@@ -12,9 +12,10 @@ O OmegaDesk é escrito do zero, em **Rust** ([por quê](docs/linguagem.md)), reu
 | Auditoria e gravação de sessões | [JumpServer](https://github.com/jumpserver/jumpserver) |
 | Streaming de baixa latência e codificação por hardware | [Sunshine](https://github.com/LizardByte/Sunshine), [Moonlight](https://github.com/moonlight-stream/moonlight-qt), [Apollo](https://github.com/ClassicOldSong/Apollo) |
 | Compatibilidade com RDP e VNC | [IronRDP](https://github.com/Devolutions/IronRDP), [FreeRDP](https://github.com/FreeRDP/FreeRDP), [TigerVNC](https://github.com/TigerVNC/tigervnc) |
+| Rede privada mesh (estilo Tailscale), sem abrir portas | [Tailscale](https://github.com/tailscale/tailscale), [Headscale](https://github.com/juanfont/headscale), [NetBird](https://github.com/netbirdio/netbird), [EasyTier](https://github.com/EasyTier/EasyTier), [boringtun](https://github.com/cloudflare/boringtun) |
 | Gerenciador de conexões em abas | [mRemoteNG](https://github.com/mRemoteNG/mRemoteNG), [1Remote](https://github.com/1Remote/1Remote) |
 
-A lista completa, com licenças e o que pode ou não ser reaproveitado, está em [docs/referencias.md](docs/referencias.md).
+A lista completa, com licenças e o que pode ou não ser reaproveitado, está em [docs/referencias.md](docs/referencias.md). O plano de construção, com a arquitetura e as fases, está em [docs/plano.md](docs/plano.md).
 
 ## Licença
 

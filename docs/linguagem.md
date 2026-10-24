@@ -24,6 +24,8 @@ Escrever o servidor também em Rust permite **compartilhar o crate do protocolo*
 
 ## Divisão inicial
 
+Versão detalhada e atualizada em [plano.md](plano.md#workspace-rust).
+
 ```
 omegadesk/
 ├── crates/
@@ -32,6 +34,7 @@ omegadesk/
 │   ├── codec/      # H.264/H.265/AV1 por hardware, com VP9 em software como fallback
 │   ├── input/      # injeção de teclado e mouse
 │   ├── transport/  # QUIC + travessia de NAT (hole punching) + relay
+│   ├── mesh/       # rede privada estilo Tailscale: WireGuard (boringtun), IPs e DNS internos, ACLs
 │   └── rdp/        # compatibilidade com RDP (via IronRDP)
 ├── agent/          # serviço que roda na máquina acessada
 ├── client/         # aplicativo de quem acessa (Tauri)
