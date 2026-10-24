@@ -24,6 +24,8 @@ Escrever o servidor também em Rust permite **compartilhar o crate do protocolo*
 
 ## Divisão inicial
 
+Versão detalhada e atualizada em [plano.md](plano.md#workspace-rust).
+
 ```
 omegadesk/
 ├── crates/
