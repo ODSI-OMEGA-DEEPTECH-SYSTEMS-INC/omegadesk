@@ -39,3 +39,23 @@ Licenças verificadas nos arquivos de cada repositório em 24/10/2026.
 ## Cópias locais
 
 Clones rasos (`--depth 1`) em `C:\Users\Ricardo.Bueno\omegadesk-ref\`. Ficam fora deste repositório de propósito.
+
+## Rede mesh (estilo Tailscale)
+
+Objetivo: cada agente e cliente do OmegaDesk entra numa rede privada criptografada, alcançando qualquer máquina pelo IP ou nome interno, atravessando NAT sem abrir portas, com relay próprio quando a conexão direta falhar.
+
+| Projeto | O que estudar | Linguagem | Licença | Copiar código? |
+|---|---|---|---|---|
+| [tailscale/tailscale](https://github.com/tailscale/tailscale) | Referência do mercado: DERP (relay), disco (descoberta de caminho), MagicDNS, ACLs, SSH | Go | BSD-3 | ✅ |
+| [juanfont/headscale](https://github.com/juanfont/headscale) | Servidor de controle do Tailscale, self-hosted | Go | BSD-3 | ✅ |
+| [netbirdio/netbird](https://github.com/netbirdio/netbird) | Gerência, signal e relay separados; ICE; políticas e checagem de postura | Go | BSD-3 no cliente, AGPL-3.0 no servidor | ✅ |
+| [EasyTier/EasyTier](https://github.com/EasyTier/EasyTier) | **Mesh descentralizada em Rust**, sem servidor central obrigatório, WireGuard, QUIC, KCP | Rust | LGPL-3.0 | ✅ |
+| [cloudflare/boringtun](https://github.com/cloudflare/boringtun) | **WireGuard em Rust (userspace)**; pode ser dependência direta | Rust | BSD-3 | ✅ |
+| [tonarino/innernet](https://github.com/tonarino/innernet) | Rede privada sobre WireGuard com CIDRs hierárquicos | Rust | MIT | ✅ |
+| [DefGuard/defguard](https://github.com/DefGuard/defguard) | WireGuard com MFA e acesso zero-trust | Rust | AGPL-3.0 (núcleo), `enterprise/` proprietário | ✅ exceto `enterprise/` |
+| [slackhq/nebula](https://github.com/slackhq/nebula) | Overlay com certificados e lighthouses | Go | MIT | ✅ |
+| [zerotier/ZeroTierOne](https://github.com/zerotier/ZeroTierOne) | Rede virtual Ethernet (camada 2) | C++ | MPL-2.0, `nonfree/` proprietário | ✅ exceto `nonfree/` |
+| [firezone/firezone](https://github.com/firezone/firezone) | Acesso remoto zero-trust; o núcleo de conexão (connlib) é em Rust | Elixir + Rust | Apache-2.0 | ✅ |
+| [gravitl/netmaker](https://github.com/gravitl/netmaker) | Automação de redes WireGuard | Go | Apache-2.0, `pro/` proprietário | ✅ exceto `pro/` |
+
+Observação: o headscale foi extraído sem `hscontrol/testdata/apiv1_golden/`, que tem nomes de arquivo inválidos no Windows.
