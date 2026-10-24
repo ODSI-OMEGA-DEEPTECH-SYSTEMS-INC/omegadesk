@@ -1,0 +1,110 @@
+// Protocolo de sessão do OmegaDesk, versão 1.
+//
+// Toda mensagem trafega dentro de um Envelope. Novos tipos entram como novos
+// campos do oneof, sem reaproveitar números de campo removidos.
+syntax = "proto3";
+
+package omegadesk.v1;
+
+message Envelope {
+  oneof payload {
+    Hello hello = 1;
+    HelloAck hello_ack = 2;
+    Ping ping = 3;
+    Pong pong = 4;
+    Error error = 5;
+    VideoFrame video_frame = 10;
+    KeyEvent key_event = 20;
+    PointerEvent pointer_event = 21;
+  }
+}
+
+// Primeira mensagem de quem abre a conexão.
+message Hello {
+  uint32 protocol_version = 1;
+  // Chave pública ed25519 do dispositivo (32 bytes).
+  bytes device_public_key = 2;
+  string device_name = 3;
+  Capabilities capabilities = 4;
+}
+
+message HelloAck {
+  uint32 protocol_version = 1;
+  bytes device_public_key = 2;
+  string device_name = 3;
+  Capabilities capabilities = 4;
+  // Codec escolhido para esta sessão, entre os que os dois lados suportam.
+  VideoCodec selected_codec = 5;
+}
+
+message Capabilities {
+  repeated VideoCodec decoders = 1;
+  repeated VideoCodec encoders = 2;
+}
+
+enum VideoCodec {
+  VIDEO_CODEC_UNSPECIFIED = 0;
+  VIDEO_CODEC_H264 = 1;
+  VIDEO_CODEC_H265 = 2;
+  VIDEO_CODEC_AV1 = 3;
+  VIDEO_CODEC_VP9 = 4;
+}
+
+// Medição de ida e volta. O timestamp é do relógio de quem envia o Ping e
+// volta intacto no Pong.
+message Ping {
+  uint64 sequence = 1;
+  uint64 sent_at_micros = 2;
+}
+
+message Pong {
+  uint64 sequence = 1;
+  uint64 ping_sent_at_micros = 2;
+}
+
+message Error {
+  ErrorCode code = 1;
+  string message = 2;
+}
+
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  ERROR_CODE_UNSUPPORTED_VERSION = 1;
+  ERROR_CODE_UNAUTHORIZED = 2;
+  ERROR_CODE_NO_COMMON_CODEC = 3;
+  ERROR_CODE_INTERNAL = 4;
+}
+
+message VideoFrame {
+  uint64 sequence = 1;
+  // Instante da captura, no relógio do host.
+  uint64 captured_at_micros = 2;
+  // Tempo entre a captura e o fim da codificação no host. O cliente soma
+  // com a rede, a decodificação e a renderização para mostrar a latência total.
+  uint32 host_processing_micros = 3;
+  VideoCodec codec = 4;
+  bool keyframe = 5;
+  uint32 display_index = 6;
+  uint32 width = 7;
+  uint32 height = 8;
+  bytes data = 9;
+}
+
+message KeyEvent {
+  // Scancode físico (USB HID usage) e keysym, para que layouts
+  // internacionais como o ABNT2 funcionem nos dois lados.
+  uint32 hid_usage = 1;
+  uint32 keysym = 2;
+  bool pressed = 3;
+  uint32 modifiers = 4;
+}
+
+message PointerEvent {
+  uint32 display_index = 1;
+  // Posição absoluta normalizada em 0..=65535 nos dois eixos.
+  uint32 x = 2;
+  uint32 y = 3;
+  uint32 buttons = 4;
+  int32 wheel_x = 5;
+  int32 wheel_y = 6;
+}
