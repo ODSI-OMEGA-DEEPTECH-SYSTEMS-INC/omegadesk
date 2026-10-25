@@ -29,19 +29,38 @@ pub mod buttons {
 /// Uma unidade de rolagem (um "clique" da roda), igual ao `WHEEL_DELTA` do Windows.
 pub const WHEEL_STEP: i32 = 120;
 
+/// Monitor que recebe o mouse, em pixels da área de trabalho virtual.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TargetDisplay {
+    /// Coordenada x do canto superior esquerdo.
+    pub x: i32,
+    /// Coordenada y do canto superior esquerdo.
+    pub y: i32,
+    /// Largura em pixels.
+    pub width: u32,
+    /// Altura em pixels.
+    pub height: u32,
+}
+
 /// Erros de injeção.
 #[derive(Debug, thiserror::Error)]
 pub enum InputError {
     /// Não há injeção para este sistema operacional.
     #[error("injeção de entrada ainda não suportada neste sistema")]
     Unsupported,
-    /// O sistema recusou o evento (por exemplo, janela com privilégio maior).
+    /// O `SendInput` falhou, por exemplo porque a área de trabalho de entrada
+    /// mudou (UAC, bloqueio). Janelas elevadas bloqueadas pelo UIPI não geram
+    /// erro: os eventos são descartados em silêncio.
     #[error("o sistema recusou o evento de entrada")]
     Rejected,
 }
 
 /// Injeta eventos de entrada na sessão local.
 pub trait InputInjector: Send {
+    /// Define o monitor que recebe o mouse (o mesmo que está sendo capturado).
+    /// Sem isso, o mouse vai para o monitor principal.
+    fn set_target(&mut self, target: TargetDisplay);
+
     /// Pressiona ou solta uma tecla.
     ///
     /// # Errors
@@ -55,6 +74,9 @@ pub trait InputInjector: Send {
     ///
     /// Retorna erro se o sistema recusar o evento.
     fn pointer(&mut self, event: &PointerEvent) -> Result<(), InputError>;
+
+    /// Solta todas as teclas e botões apertados por este injetor.
+    fn release_all(&mut self);
 }
 
 /// Abre o injetor do sistema operacional atual.

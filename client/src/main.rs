@@ -3,7 +3,7 @@
 //! Uso (Fase 1, rede local):
 //!
 //! ```text
-//! omegadesk-client 192.168.0.10:7070 --fingerprint ab:cd:…
+//! omegadesk-client 192.168.0.10:7070 --fingerprint ab:cd:… --password <senha>
 //! ```
 //!
 //! A barra de título mostra a latência: tempo no host, rede (metade do ping),
@@ -30,6 +30,10 @@ struct Args {
     #[arg(long)]
     fingerprint: String,
 
+    /// Senha de acesso mostrada pelo agente ao iniciar.
+    #[arg(long, env = "OMEGADESK_PASSWORD")]
+    password: String,
+
     /// Só assiste: não envia teclado nem mouse.
     #[arg(long)]
     view_only: bool,
@@ -50,8 +54,11 @@ fn main() -> anyhow::Result<()> {
         .context("não foi possível criar a janela")?;
     let shared = stats::Shared::default();
     let input = network::start(
-        args.address,
-        args.fingerprint,
+        network::Target {
+            address: args.address,
+            fingerprint: args.fingerprint,
+            password: args.password,
+        },
         shared.clone(),
         event_loop.create_proxy(),
     );

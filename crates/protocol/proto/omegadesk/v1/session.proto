@@ -13,6 +13,7 @@ message Envelope {
     Ping ping = 3;
     Pong pong = 4;
     Error error = 5;
+    RequestKeyframe request_keyframe = 6;
     VideoFrame video_frame = 10;
     KeyEvent key_event = 20;
     PointerEvent pointer_event = 21;
@@ -26,6 +27,8 @@ message Hello {
   bytes device_public_key = 2;
   string device_name = 3;
   Capabilities capabilities = 4;
+  // Senha de acesso mostrada pelo agente. Sem ela o agente recusa a conexão.
+  string access_password = 5;
 }
 
 message HelloAck {
@@ -61,6 +64,10 @@ message Pong {
   uint64 sequence = 1;
   uint64 ping_sent_at_micros = 2;
 }
+
+// O cliente perdeu a sequência de quadros (erro de decodificação ou quadro
+// descartado) e precisa de um keyframe para voltar a mostrar a imagem.
+message RequestKeyframe {}
 
 message Error {
   ErrorCode code = 1;

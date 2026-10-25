@@ -1,8 +1,9 @@
 //! Backend DXGI Desktop Duplication (Windows 8 ou superior).
 //!
-//! Fluxo, no estilo do Sunshine (`src/platform/windows/display_base.cpp`):
-//! `IDXGIOutput1::DuplicateOutput` → `AcquireNextFrame` → cópia para uma
-//! textura de staging → `Map` → BGRA na CPU.
+//! Fluxo, no estilo do Sunshine (`src/platform/windows/display_base.cpp` e
+//! `display_ram.cpp`): `IDXGIOutput1::DuplicateOutput` → `AcquireNextFrame` →
+//! cópia para uma textura de staging → `Map` → BGRA na CPU, linha a linha
+//! respeitando o `RowPitch`.
 
 #![allow(unsafe_code, reason = "chamadas COM do Direct3D/DXGI")]
 
@@ -15,13 +16,22 @@ use windows::Win32::Graphics::Direct3D11::{
     D3D11_MAPPED_SUBRESOURCE, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
     D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
 };
+use windows::Win32::Graphics::Dxgi::Common::{
+    DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_MODE_ROTATION_IDENTITY, DXGI_MODE_ROTATION_UNSPECIFIED,
+};
 use windows::Win32::Graphics::Dxgi::{
-    CreateDXGIFactory1, DXGI_ERROR_ACCESS_LOST, DXGI_ERROR_NOT_FOUND, DXGI_ERROR_WAIT_TIMEOUT,
-    DXGI_OUTDUPL_FRAME_INFO, IDXGIFactory1, IDXGIOutput1, IDXGIOutputDuplication, IDXGIResource,
+    CreateDXGIFactory1, DXGI_ERROR_ACCESS_DENIED, DXGI_ERROR_ACCESS_LOST,
+    DXGI_ERROR_DEVICE_REMOVED, DXGI_ERROR_INVALID_CALL, DXGI_ERROR_NOT_CURRENTLY_AVAILABLE,
+    DXGI_ERROR_NOT_FOUND, DXGI_ERROR_SESSION_DISCONNECTED, DXGI_ERROR_WAIT_TIMEOUT,
+    DXGI_OUTDUPL_FRAME_INFO, IDXGIDevice1, IDXGIFactory1, IDXGIOutput1, IDXGIOutputDuplication,
+    IDXGIResource,
 };
 use windows::core::Interface;
 
-use crate::{CaptureError, Capturer, Frame};
+use crate::{CaptureError, Capturer, DisplayBounds, Frame};
+
+/// Prioridade de GPU máxima aceita sem privilégio especial (Sunshine usa 7).
+const GPU_THREAD_PRIORITY: i32 = 7;
 
 pub(crate) struct DxgiCapturer {
     device: ID3D11Device,
@@ -32,14 +42,24 @@ pub(crate) struct DxgiCapturer {
     first_frame: bool,
     width: u32,
     height: u32,
+    bounds: DisplayBounds,
 }
 
 // Os objetos COM ficam presos a esta struct e só são usados pela thread que
 // chama `next_frame`; o dispositivo D3D11 é criado sem a flag single-threaded.
 unsafe impl Send for DxgiCapturer {}
 
+/// Erros que pedem para reabrir a duplicação: troca de modo, tela de login ou
+/// UAC (desktop seguro), sessão desconectada, GPU reiniciada. Mesmos casos que
+/// o Sunshine (`display_base.cpp`) e o `RustDesk` (`scrap/src/dxgi/mod.rs`) tratam.
 fn os_error(error: &windows::core::Error) -> CaptureError {
-    if error.code() == DXGI_ERROR_ACCESS_LOST {
+    let code = error.code();
+    if code == DXGI_ERROR_ACCESS_LOST
+        || code == DXGI_ERROR_ACCESS_DENIED
+        || code == DXGI_ERROR_SESSION_DISCONNECTED
+        || code == DXGI_ERROR_NOT_CURRENTLY_AVAILABLE
+        || code == DXGI_ERROR_DEVICE_REMOVED
+    {
         CaptureError::AccessLost
     } else {
         CaptureError::Os(error.to_string())
@@ -51,10 +71,12 @@ impl DxgiCapturer {
         unsafe {
             let factory: IDXGIFactory1 = CreateDXGIFactory1().map_err(|e| os_error(&e))?;
 
-            // Procura o monitor `index` percorrendo as saídas de todos os adaptadores.
+            // Procura o monitor `index` entre as saídas ligadas à área de
+            // trabalho, em todos os adaptadores (Sunshine e CrossDesk filtram
+            // `AttachedToDesktop` do mesmo jeito).
             let mut remaining = index;
             let mut adapter_index = 0;
-            let (adapter, output) = loop {
+            let (adapter, output, description) = loop {
                 let adapter = match factory.EnumAdapters1(adapter_index) {
                     Ok(adapter) => adapter,
                     Err(e) if e.code() == DXGI_ERROR_NOT_FOUND => {
@@ -64,16 +86,23 @@ impl DxgiCapturer {
                 };
                 let mut output_index = 0;
                 let found = loop {
-                    match adapter.EnumOutputs(output_index) {
-                        Ok(output) if remaining == 0 => break Some(output),
-                        Ok(_) => remaining -= 1,
+                    let output = match adapter.EnumOutputs(output_index) {
+                        Ok(output) => output,
                         Err(e) if e.code() == DXGI_ERROR_NOT_FOUND => break None,
                         Err(e) => return Err(os_error(&e)),
-                    }
+                    };
                     output_index += 1;
+                    let description = output.GetDesc().map_err(|e| os_error(&e))?;
+                    if !description.AttachedToDesktop.as_bool() {
+                        continue;
+                    }
+                    if remaining == 0 {
+                        break Some((output, description));
+                    }
+                    remaining -= 1;
                 };
-                if let Some(output) = found {
-                    break (adapter, output);
+                if let Some((output, description)) = found {
+                    break (adapter, output, description);
                 }
                 adapter_index += 1;
             };
@@ -97,49 +126,86 @@ impl DxgiCapturer {
             let context: ID3D11DeviceContext =
                 context.ok_or_else(|| CaptureError::Os("D3D11 sem contexto".into()))?;
 
+            // Sem fila de quadros na GPU e com prioridade alta, como o Sunshine:
+            // sob carga de jogos, a cópia e o Map travariam sem isso.
+            if let Ok(dxgi_device) = device.cast::<IDXGIDevice1>() {
+                let _ = dxgi_device.SetMaximumFrameLatency(1);
+                let _ = dxgi_device.SetGPUThreadPriority(GPU_THREAD_PRIORITY);
+            }
+
             let output: IDXGIOutput1 = output.cast().map_err(|e| os_error(&e))?;
             let duplication = output.DuplicateOutput(&device).map_err(|e| os_error(&e))?;
-            let description = duplication.GetDesc();
+            let duplication_description = duplication.GetDesc();
+            let rotation = duplication_description.Rotation;
+            if rotation != DXGI_MODE_ROTATION_IDENTITY && rotation != DXGI_MODE_ROTATION_UNSPECIFIED
+            {
+                // Fase 3: girar o quadro, como o RustDesk (`ARGBRotate`).
+                return Err(CaptureError::Os(
+                    "monitor girado ainda não é suportado".into(),
+                ));
+            }
 
+            let rect = description.DesktopCoordinates;
             Ok(Self {
                 device,
                 context,
                 duplication,
                 staging: None,
                 first_frame: true,
-                width: description.ModeDesc.Width,
-                height: description.ModeDesc.Height,
+                width: duplication_description.ModeDesc.Width,
+                height: duplication_description.ModeDesc.Height,
+                bounds: DisplayBounds {
+                    x: rect.left,
+                    y: rect.top,
+                    width: duplication_description.ModeDesc.Width,
+                    height: duplication_description.ModeDesc.Height,
+                },
             })
         }
     }
 
     /// Textura de staging (leitura pela CPU) no formato do quadro capturado.
-    fn staging_for(&mut self, source: &ID3D11Texture2D) -> Result<ID3D11Texture2D, CaptureError> {
+    fn staging_for(
+        &mut self,
+        description: &D3D11_TEXTURE2D_DESC,
+    ) -> Result<ID3D11Texture2D, CaptureError> {
         if let Some(staging) = &self.staging {
             return Ok(staging.clone());
         }
-        unsafe {
-            let mut description = D3D11_TEXTURE2D_DESC::default();
-            source.GetDesc(&raw mut description);
-            description.Usage = D3D11_USAGE_STAGING;
-            description.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0.cast_unsigned();
-            description.BindFlags = 0;
-            description.MiscFlags = 0;
+        let mut staging_description = *description;
+        staging_description.Usage = D3D11_USAGE_STAGING;
+        staging_description.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0.cast_unsigned();
+        staging_description.BindFlags = 0;
+        staging_description.MiscFlags = 0;
 
-            let mut staging = None;
+        let mut staging = None;
+        unsafe {
             self.device
-                .CreateTexture2D(&raw const description, None, Some(&raw mut staging))
+                .CreateTexture2D(&raw const staging_description, None, Some(&raw mut staging))
                 .map_err(|e| os_error(&e))?;
-            let staging =
-                staging.ok_or_else(|| CaptureError::Os("textura de staging não criada".into()))?;
-            self.staging = Some(staging.clone());
-            Ok(staging)
         }
+        let staging =
+            staging.ok_or_else(|| CaptureError::Os("textura de staging não criada".into()))?;
+        self.staging = Some(staging.clone());
+        Ok(staging)
     }
 
     fn copy_to_cpu(&mut self, resource: &IDXGIResource) -> Result<Vec<u8>, CaptureError> {
         let texture: ID3D11Texture2D = resource.cast().map_err(|e| os_error(&e))?;
-        let staging = self.staging_for(&texture)?;
+        let mut description = D3D11_TEXTURE2D_DESC::default();
+        unsafe { texture.GetDesc(&raw mut description) };
+
+        // A cópia linha a linha usa width/height; se a textura não bater (troca
+        // de modo em andamento, HDR), ler a memória mapeada seria inválido.
+        // Como o Sunshine (`display_ram.cpp`), pede para reabrir.
+        if description.Width != self.width
+            || description.Height != self.height
+            || description.Format != DXGI_FORMAT_B8G8R8A8_UNORM
+        {
+            return Err(CaptureError::AccessLost);
+        }
+
+        let staging = self.staging_for(&description)?;
         unsafe {
             self.context.CopyResource(&staging, &texture);
 
@@ -199,13 +265,19 @@ impl Capturer for DxgiCapturer {
             }
         };
 
-        unsafe {
-            self.duplication.ReleaseFrame().map_err(|e| os_error(&e))?;
+        match unsafe { self.duplication.ReleaseFrame() } {
+            // INVALID_CALL: o quadro já foi liberado (Sunshine ignora também).
+            Err(e) if e.code() != DXGI_ERROR_INVALID_CALL => return Err(os_error(&e)),
+            Ok(()) | Err(_) => {}
         }
         result
     }
 
     fn size(&self) -> (u32, u32) {
         (self.width, self.height)
+    }
+
+    fn bounds(&self) -> DisplayBounds {
+        self.bounds
     }
 }

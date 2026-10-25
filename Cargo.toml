@@ -20,7 +20,7 @@ omegadesk-transport = { path = "crates/transport" }
 
 anyhow = "1"
 bytes = "1"
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 data-encoding = "2"
 ed25519-dalek = { version = "2", features = ["rand_core", "zeroize"] }
 keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native"] }

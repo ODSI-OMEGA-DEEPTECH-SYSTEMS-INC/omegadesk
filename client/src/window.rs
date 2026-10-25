@@ -48,6 +48,7 @@ pub(crate) struct App {
     meter: Meter,
     cursor: (f64, f64),
     pressed_buttons: u32,
+    pressed_keys: std::collections::BTreeSet<u32>,
     error: Option<anyhow::Error>,
 }
 
@@ -66,12 +67,28 @@ impl App {
             meter: Meter::default(),
             cursor: (0.0, 0.0),
             pressed_buttons: 0,
+            pressed_keys: std::collections::BTreeSet::new(),
             error: None,
         }
     }
 
     pub(crate) fn into_result(self) -> anyhow::Result<()> {
         self.error.map_or(Ok(()), Err)
+    }
+
+    fn release_all(&mut self) {
+        for hid_usage in std::mem::take(&mut self.pressed_keys) {
+            self.send(Payload::KeyEvent(KeyEvent {
+                hid_usage,
+                keysym: 0,
+                pressed: false,
+                modifiers: 0,
+            }));
+        }
+        if self.pressed_buttons != 0 {
+            self.pressed_buttons = 0;
+            self.send_pointer(0, 0);
+        }
     }
 
     fn send(&self, payload: Payload) {
@@ -307,18 +324,23 @@ impl ApplicationHandler<UserEvent> for App {
                     Key::Character(text) => text.chars().next().map_or(0, u32::from),
                     _ => 0,
                 };
+                let pressed = event.state == ElementState::Pressed;
+                if pressed {
+                    self.pressed_keys.insert(hid_usage);
+                } else {
+                    self.pressed_keys.remove(&hid_usage);
+                }
                 self.send(Payload::KeyEvent(KeyEvent {
                     hid_usage,
                     keysym,
-                    pressed: event.state == ElementState::Pressed,
+                    pressed,
                     modifiers: 0,
                 }));
             }
-            // Solta os botões ao perder o foco para não deixar nada preso.
-            WindowEvent::Focused(false) if self.pressed_buttons != 0 => {
-                self.pressed_buttons = 0;
-                self.send_pointer(0, 0);
-            }
+            // Ao perder o foco (Alt+Tab, clique fora), solta tudo que estava
+            // apertado, como o `raiseAllKeys` do Moonlight: senão Alt ou Ctrl
+            // ficariam presos na máquina remota.
+            WindowEvent::Focused(false) => self.release_all(),
             _ => {}
         }
     }

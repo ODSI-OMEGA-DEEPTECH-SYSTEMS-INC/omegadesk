@@ -49,7 +49,7 @@ impl OpenH264Encoder {
 }
 
 impl VideoEncoder for OpenH264Encoder {
-    fn encode(&mut self, frame: RawFrame<'_>) -> Result<Option<EncodedFrame>, CodecError> {
+    fn encode(&mut self, frame: RawFrame<'_>) -> Result<Vec<EncodedFrame>, CodecError> {
         if frame.width < 2
             || frame.height < 2
             || frame.width > MAX_DIMENSION
@@ -72,35 +72,24 @@ impl VideoEncoder for OpenH264Encoder {
         // H.264 4:2:0 precisa de dimensões pares: descarta a última coluna/linha.
         let width = source_width & !1;
         let height = frame.height as usize & !1;
-        let (y, u, v) = if width == source_width {
-            bgra_to_i420(&frame.bgra[..width * height * 4], width, height)
-        } else {
-            let cropped: Vec<u8> = frame
-                .bgra
-                .chunks_exact(source_width * 4)
-                .take(height)
-                .flat_map(|row| &row[..width * 4])
-                .copied()
-                .collect();
-            bgra_to_i420(&cropped, width, height)
-        };
+        let (y, u, v) = bgra_to_i420(frame.bgra, source_width, width, height);
 
         let yuv = YUVSlices::new((&y, &u, &v), (width, height), (width, width / 2, width / 2));
         let bitstream = self.encoder.encode(&yuv)?;
         let keyframe = matches!(bitstream.frame_type(), FrameType::IDR | FrameType::I);
         if matches!(bitstream.frame_type(), FrameType::Skip | FrameType::Invalid) {
-            return Ok(None);
+            return Ok(Vec::new());
         }
         let data = bitstream.to_vec();
         if data.is_empty() {
-            return Ok(None);
+            return Ok(Vec::new());
         }
-        Ok(Some(EncodedFrame {
+        Ok(vec![EncodedFrame {
             data,
             keyframe,
             width: u32::try_from(width).unwrap_or(MAX_DIMENSION),
             height: u32::try_from(height).unwrap_or(MAX_DIMENSION),
-        }))
+        }])
     }
 
     fn request_keyframe(&mut self) {

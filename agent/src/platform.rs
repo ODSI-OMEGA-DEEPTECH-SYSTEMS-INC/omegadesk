@@ -4,11 +4,20 @@
 ///
 /// No Windows 11, processos sem janela em primeiro plano entram em
 /// "power throttling" (`EcoQoS`) e vão para os núcleos econômicos. Num Intel
-/// Core Ultra 5 135U isso deixou a codificação 8 vezes mais lenta (de ~80 ms
-/// para ~680 ms por quadro 1080p). O Sunshine faz o mesmo ajuste.
+/// Core Ultra 5 135U isso deixou a codificação 17 vezes mais lenta (de ~40 ms
+/// para ~680 ms por quadro 1080p). Nenhuma das referências desliga o `EcoQoS`;
+/// o Sunshine só sobe a classe de prioridade (`HIGH_PRIORITY_CLASS`), o que
+/// também fazemos.
 pub(crate) fn prefer_performance() {
     #[cfg(windows)]
     windows_impl::prefer_performance();
+}
+
+/// Sobe a prioridade da thread atual (captura e codificação), como o Sunshine
+/// faz na thread de vídeo (`src/platform/windows/misc.cpp`).
+pub(crate) fn boost_current_thread() {
+    #[cfg(windows)]
+    windows_impl::boost_current_thread();
 }
 
 #[cfg(windows)]
@@ -19,16 +28,20 @@ mod windows_impl {
 
     use tracing::{info, warn};
     use windows::Win32::System::Threading::{
-        GetCurrentProcess, HIGH_PRIORITY_CLASS, PROCESS_POWER_THROTTLING_CURRENT_VERSION,
-        PROCESS_POWER_THROTTLING_EXECUTION_SPEED, PROCESS_POWER_THROTTLING_STATE,
-        ProcessPowerThrottling, SetPriorityClass, SetProcessInformation,
+        GetCurrentProcess, GetCurrentThread, HIGH_PRIORITY_CLASS,
+        PROCESS_POWER_THROTTLING_CURRENT_VERSION, PROCESS_POWER_THROTTLING_EXECUTION_SPEED,
+        PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION, PROCESS_POWER_THROTTLING_STATE,
+        ProcessPowerThrottling, SetPriorityClass, SetProcessInformation, SetThreadPriority,
+        THREAD_PRIORITY_HIGHEST,
     };
 
     pub(super) fn prefer_performance() {
         let state = PROCESS_POWER_THROTTLING_STATE {
             Version: PROCESS_POWER_THROTTLING_CURRENT_VERSION,
-            // Controla a velocidade de execução e pede "sem throttling" (0).
-            ControlMask: PROCESS_POWER_THROTTLING_EXECUTION_SPEED,
+            // Controla velocidade de execução e resolução de timer, pedindo
+            // "sem throttling" (0) para as duas.
+            ControlMask: PROCESS_POWER_THROTTLING_EXECUTION_SPEED
+                | PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION,
             StateMask: 0,
         };
         let size = u32::try_from(size_of::<PROCESS_POWER_THROTTLING_STATE>()).unwrap_or(0);
@@ -45,6 +58,14 @@ mod windows_impl {
             match SetPriorityClass(process, HIGH_PRIORITY_CLASS) {
                 Ok(()) => info!("agente em prioridade alta e sem power throttling"),
                 Err(error) => warn!("não foi possível subir a prioridade: {error}"),
+            }
+        }
+    }
+
+    pub(super) fn boost_current_thread() {
+        unsafe {
+            if let Err(error) = SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST) {
+                warn!("não foi possível subir a prioridade da thread: {error}");
             }
         }
     }

@@ -16,6 +16,7 @@ omegadesk-codec.workspace = true
 omegadesk-input.workspace = true
 omegadesk-protocol.workspace = true
 omegadesk-transport.workspace = true
+rand_core.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
