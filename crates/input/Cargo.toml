@@ -1,0 +1,19 @@
+[package]
+name = "omegadesk-input"
+description = "Injeção de teclado e mouse do OmegaDesk"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+omegadesk-protocol.workspace = true
+thiserror.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = ["Win32_UI_Input_KeyboardAndMouse"] }
+
+[lints]
+workspace = true
