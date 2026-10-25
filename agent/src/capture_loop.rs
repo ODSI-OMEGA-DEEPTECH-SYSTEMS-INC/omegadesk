@@ -1,7 +1,7 @@
 //! Laço de captura e codificação, numa thread própria (as APIs são bloqueantes).
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use omegadesk_capture::{CaptureError, Capturer, Frame};
 use omegadesk_codec::{EncoderSettings, OpenH264Encoder, RawFrame, VideoEncoder};
@@ -53,6 +53,7 @@ pub(crate) fn run(
     let mut capturer: Option<Box<dyn Capturer>> = None;
     let mut last: Option<Frame> = None;
     let mut sequence = 0u64;
+    let mut timing = Timing::default();
 
     while !stop.load(Ordering::Relaxed) {
         let Some(active) = capturer.as_mut() else {
@@ -89,12 +90,14 @@ pub(crate) fn run(
             }
         };
 
+        let encode_start = Instant::now();
         let encoded = encoder.encode(RawFrame {
             width: frame.width,
             height: frame.height,
             bgra: &frame.bgra,
         });
         let host_processing = frame.captured_at.elapsed();
+        timing.record(encode_start - frame.captured_at, encode_start.elapsed());
         let encoded = match encoded {
             Ok(Some(encoded)) => encoded,
             Ok(None) => continue,
@@ -119,6 +122,38 @@ pub(crate) fn run(
         last = Some(frame);
         if frames.blocking_send(video_frame).is_err() {
             break;
+        }
+    }
+}
+
+/// Tempos por etapa, registrados no log a cada [`TIMING_PERIOD`].
+#[derive(Debug, Default)]
+struct Timing {
+    frames: u32,
+    capture: Duration,
+    encode: Duration,
+    since: Option<Instant>,
+}
+
+/// Intervalo entre os registros de tempo no log.
+const TIMING_PERIOD: Duration = Duration::from_secs(5);
+
+impl Timing {
+    fn record(&mut self, capture: Duration, encode: Duration) {
+        let since = *self.since.get_or_insert_with(Instant::now);
+        self.frames += 1;
+        self.capture += capture;
+        self.encode += encode;
+        let elapsed = since.elapsed();
+        if elapsed >= TIMING_PERIOD {
+            let ms = |d: Duration| d.as_secs_f64() * 1000.0 / f64::from(self.frames);
+            info!(
+                "{:.1} quadros/s · cópia da tela {:.1} ms · codificação {:.1} ms",
+                f64::from(self.frames) / elapsed.as_secs_f64(),
+                ms(self.capture),
+                ms(self.encode),
+            );
+            *self = Self::default();
         }
     }
 }

@@ -11,6 +11,7 @@
 //! para conectar.
 
 mod capture_loop;
+mod platform;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -63,11 +64,14 @@ const ENCODERS: [VideoCodec; 1] = [VideoCodec::H264];
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stderr()))
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
     let args = Arc::new(Args::parse());
+    platform::prefer_performance();
 
     let (endpoint, fingerprint) =
         server_endpoint(args.listen).context("não foi possível abrir a porta do agente")?;

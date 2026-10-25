@@ -117,11 +117,24 @@ async fn run(
 
     let video = tokio::spawn(async move {
         let mut reader = EnvelopeReader::new(video_recv);
-        while let Ok(Some(envelope)) = reader.next().await {
-            if let Some(Payload::VideoFrame(frame)) = envelope.payload
-                && decode_tx.send(frame).is_err()
-            {
-                break;
+        loop {
+            match reader.next().await {
+                Ok(Some(envelope)) => {
+                    if let Some(Payload::VideoFrame(frame)) = envelope.payload
+                        && decode_tx.send(frame).is_err()
+                    {
+                        warn!("decoder parou; encerrando o vídeo");
+                        break;
+                    }
+                }
+                Ok(None) => {
+                    warn!("o agente encerrou o stream de vídeo");
+                    break;
+                }
+                Err(error) => {
+                    warn!("erro no stream de vídeo: {error}");
+                    break;
+                }
             }
         }
     });
