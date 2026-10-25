@@ -1,0 +1,45 @@
+//! Mede a conversão de cor e a codificação de um quadro 1080p.
+//!
+//! `cargo run --release -p omegadesk-codec --example bench`
+
+use std::time::Instant;
+
+use omegadesk_codec::{EncoderSettings, OpenH264Encoder, RawFrame, VideoEncoder, bgra_to_i420};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let (width, height) = (1920_u32, 1080_u32);
+    let mut bgra = vec![0u8; (width * height * 4) as usize];
+    for (i, byte) in bgra.iter_mut().enumerate() {
+        *byte = u8::try_from((i * 7 + i / 7919) % 251).unwrap_or(0);
+    }
+
+    let start = Instant::now();
+    for _ in 0..10 {
+        std::hint::black_box(bgra_to_i420(&bgra, width as usize, height as usize));
+    }
+    tracing_line("conversão BGRA→I420", start.elapsed() / 10);
+
+    let mut encoder = OpenH264Encoder::new(EncoderSettings::default())?;
+    for round in 0..5 {
+        bgra[round * 4096] ^= 0xFF;
+        let start = Instant::now();
+        let frame = encoder.encode(RawFrame {
+            width,
+            height,
+            bgra: &bgra,
+        })?;
+        tracing_line(
+            &format!(
+                "codificação #{round} ({} bytes)",
+                frame.map_or(0, |f| f.data.len())
+            ),
+            start.elapsed(),
+        );
+    }
+    Ok(())
+}
+
+#[allow(clippy::print_stderr)]
+fn tracing_line(label: &str, elapsed: std::time::Duration) {
+    eprintln!("{label}: {:.1} ms", elapsed.as_secs_f64() * 1000.0);
+}

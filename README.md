@@ -20,3 +20,21 @@ A lista completa, com licenças e o que pode ou não ser reaproveitado, está em
 ## Licença
 
 [AGPL-3.0](LICENSE), a mesma do RustDesk. Ela permite incorporar código sob AGPL-3.0, GPL-3.0, GPL-2.0-ou-posterior, Apache-2.0, MPL-2.0 e MIT. Código sob **GPL-2.0-only** ou licenças proprietárias **não** pode ser copiado para cá.
+
+## Como testar (Fase 1)
+
+Na máquina que vai ser acessada (Windows):
+
+```sh
+cargo run --release -p omegadesk-agent -- --listen 0.0.0.0:7070
+```
+
+O agente mostra uma **impressão digital**. Na máquina de onde você vai acessar:
+
+```sh
+cargo run --release -p omegadesk-client -- 192.168.0.10:7070 --fingerprint <impressão digital>
+```
+
+A barra de título do cliente mostra a latência: tempo no host, rede, decodificação e desenho. Use `--view-only` no cliente para só assistir, ou `--no-input` no agente para não aceitar teclado e mouse.
+
+Primeira medição (Intel Core Ultra 5 135U, 1920x1080, agente e cliente na mesma máquina, H.264 por software): **24 fps e cerca de 48 ms de latência total**, dos quais ~40 ms são de codificação. O encoder por hardware é o próximo passo para chegar à meta de 30 ms.
