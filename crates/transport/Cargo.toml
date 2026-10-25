@@ -1,6 +1,6 @@
 [package]
 name = "omegadesk-transport"
-description = "Transporte QUIC do OmegaDesk"
+description = "QUIC transport for OmegaDesk"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

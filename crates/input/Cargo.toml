@@ -1,6 +1,6 @@
 [package]
 name = "omegadesk-input"
-description = "Injeção de teclado e mouse do OmegaDesk"
+description = "Keyboard and mouse injection for OmegaDesk"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

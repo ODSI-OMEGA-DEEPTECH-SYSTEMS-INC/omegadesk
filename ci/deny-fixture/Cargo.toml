@@ -1,0 +1,13 @@
+# Fixture for CI: a crate under a license OmegaDesk must never accept.
+# `cargo deny check licenses` with the project's deny.toml has to reject it.
+[workspace]
+
+[package]
+name = "deny-fixture-gpl2-only"
+version = "0.0.0"
+edition = "2024"
+license = "GPL-2.0-only"
+publish = false
+
+[lib]
+path = "src/lib.rs"

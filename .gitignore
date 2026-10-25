@@ -4,3 +4,4 @@
 *.pdb
 .idea/
 .vscode/
+ci/deny-fixture/Cargo.lock

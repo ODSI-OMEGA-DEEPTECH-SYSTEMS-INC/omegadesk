@@ -1,6 +1,6 @@
 [package]
 name = "omegadesk-codec"
-description = "Codificação e decodificação de vídeo do OmegaDesk"
+description = "Video encoding and decoding for OmegaDesk"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

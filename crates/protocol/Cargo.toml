@@ -1,6 +1,6 @@
 [package]
 name = "omegadesk-protocol"
-description = "Mensagens do protocolo de sessão do OmegaDesk"
+description = "OmegaDesk session protocol messages and framing"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
