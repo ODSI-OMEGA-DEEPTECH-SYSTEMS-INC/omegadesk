@@ -1,6 +1,6 @@
 [package]
 name = "omegadesk-agent"
-description = "Agente do OmegaDesk: compartilha a tela desta máquina"
+description = "OmegaDesk agent: shares this machine"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

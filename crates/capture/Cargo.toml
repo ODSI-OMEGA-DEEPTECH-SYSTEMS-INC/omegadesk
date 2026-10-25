@@ -1,6 +1,6 @@
 [package]
 name = "omegadesk-capture"
-description = "Captura de tela do OmegaDesk"
+description = "Screen capture for OmegaDesk"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

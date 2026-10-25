@@ -1,6 +1,6 @@
 [package]
 name = "omegadesk-identity"
-description = "Identidade criptográfica dos dispositivos OmegaDesk"
+description = "Cryptographic device identity for OmegaDesk"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

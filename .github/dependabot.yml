@@ -1,0 +1,44 @@
+# Grouped updates (like IronRDP) with a cooldown (like Firezone), so new
+# releases have time to be vetted before they reach us.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+      semver-major-days: 30
+    commit-message:
+      prefix: "build(deps)"
+    groups:
+      crypto:
+        patterns:
+          - "*ring*"
+          - "*rustls*"
+          - "rcgen"
+          - "*dalek*"
+          - "sha2"
+          - "rand*"
+          - "zeroize"
+          - "quinn*"
+      windows:
+        patterns:
+          - "windows*"
+      patch:
+        update-types: [patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "ci(deps)"
+    groups:
+      actions:
+        patterns: ["*"]

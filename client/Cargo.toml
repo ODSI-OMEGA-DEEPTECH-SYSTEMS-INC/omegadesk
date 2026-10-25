@@ -1,6 +1,6 @@
 [package]
 name = "omegadesk-client"
-description = "Cliente do OmegaDesk: acessa a tela de outra máquina"
+description = "OmegaDesk client: connects to a remote machine"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

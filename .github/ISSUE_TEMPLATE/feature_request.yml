@@ -1,0 +1,31 @@
+name: Feature request
+description: Suggest an idea or an improvement.
+labels: [enhancement, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check the [roadmap](https://github.com/OmegaSoftDLL/omegadesk/blob/main/docs/plan.md) first: your idea may already be planned. Open-ended ideas fit better in [Discussions](https://github.com/OmegaSoftDLL/omegadesk/discussions).
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the situation and why the current behavior is not enough.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How would you like it to work?
+    validations:
+      required: true
+  - type: textarea
+    id: references
+    attributes:
+      label: How do other tools do it?
+      description: RustDesk, Sunshine, Tailscale, MeshCentral, Guacamole… Links to their code or docs help a lot.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
