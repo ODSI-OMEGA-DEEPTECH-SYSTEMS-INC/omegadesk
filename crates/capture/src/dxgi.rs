@@ -28,6 +28,8 @@ pub(crate) struct DxgiCapturer {
     context: ID3D11DeviceContext,
     duplication: IDXGIOutputDuplication,
     staging: Option<ID3D11Texture2D>,
+    /// O primeiro quadro depois de abrir é sempre a imagem completa da tela.
+    first_frame: bool,
     width: u32,
     height: u32,
 }
@@ -106,6 +108,7 @@ impl DxgiCapturer {
                 context,
                 duplication,
                 staging: None,
+                first_frame: true,
                 width: description.ModeDesc.Width,
                 height: description.ModeDesc.Height,
             })
@@ -179,12 +182,14 @@ impl Capturer for DxgiCapturer {
         }
         let captured_at = Instant::now();
 
-        // Só o cursor mudou: a imagem da tela é a mesma.
-        let result = if info.LastPresentTime == 0 {
+        // Só o cursor mudou: a imagem da tela é a mesma. O primeiro quadro
+        // é copiado mesmo assim, para o cliente ter uma imagem inicial.
+        let result = if info.LastPresentTime == 0 && !self.first_frame {
             Ok(None)
         } else {
             match &resource {
                 Some(resource) => self.copy_to_cpu(resource).map(|bgra| {
+                    self.first_frame = false;
                     Some(Frame {
                         width: self.width,
                         height: self.height,

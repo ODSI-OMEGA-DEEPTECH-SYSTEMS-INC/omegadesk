@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*"]
+members = ["crates/*", "agent", "client"]
 
 [workspace.package]
 version = "0.1.0"
@@ -58,6 +58,7 @@ dbg_macro = "deny"
 todo = "deny"
 print_stdout = "deny"
 print_stderr = "deny"
+similar_names = "allow"
 
 [profile.release]
 lto = "thin"

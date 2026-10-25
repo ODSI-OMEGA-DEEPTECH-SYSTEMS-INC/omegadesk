@@ -1,0 +1,24 @@
+[package]
+name = "omegadesk-agent"
+description = "Agente do OmegaDesk: compartilha a tela desta máquina"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+omegadesk-capture.workspace = true
+omegadesk-codec.workspace = true
+omegadesk-input.workspace = true
+omegadesk-protocol.workspace = true
+omegadesk-transport.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true
