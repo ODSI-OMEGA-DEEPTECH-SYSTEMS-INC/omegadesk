@@ -1,0 +1,16 @@
+[package]
+name = "omegadesk-codec"
+description = "Codificação e decodificação de vídeo do OmegaDesk"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+openh264.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
