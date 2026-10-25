@@ -15,7 +15,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let start = Instant::now();
     for _ in 0..10 {
-        std::hint::black_box(bgra_to_i420(&bgra, width as usize, height as usize));
+        std::hint::black_box(bgra_to_i420(
+            &bgra,
+            width as usize,
+            width as usize,
+            height as usize,
+        ));
     }
     tracing_line("conversão BGRA→I420", start.elapsed() / 10);
 
@@ -31,10 +36,39 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing_line(
             &format!(
                 "codificação #{round} ({} bytes)",
-                frame.map_or(0, |f| f.data.len())
+                frame.iter().map(|f| f.data.len()).sum::<usize>()
             ),
             start.elapsed(),
         );
+    }
+    #[cfg(windows)]
+    {
+        let mut hardware = omegadesk_codec::MediaFoundationEncoder::new(
+            width,
+            height,
+            EncoderSettings::default(),
+        )?;
+        tracing_line(
+            &format!("hardware: {}", hardware.name()),
+            std::time::Duration::ZERO,
+        );
+        for round in 0..10 {
+            bgra[round * 4096] ^= 0xFF;
+            let start = Instant::now();
+            let frames = hardware.encode(RawFrame {
+                width,
+                height,
+                bgra: &bgra,
+            })?;
+            tracing_line(
+                &format!(
+                    "hardware #{round} ({} quadros, {} bytes)",
+                    frames.len(),
+                    frames.iter().map(|f| f.data.len()).sum::<usize>()
+                ),
+                start.elapsed(),
+            );
+        }
     }
     Ok(())
 }

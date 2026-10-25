@@ -6,9 +6,13 @@
 //! sem mudar quem usa o crate.
 
 mod color;
+#[cfg(windows)]
+mod media_foundation;
 mod openh264_codec;
 
-pub use color::bgra_to_i420;
+pub use color::{bgra_to_i420, bgra_to_nv12};
+#[cfg(windows)]
+pub use media_foundation::MediaFoundationEncoder;
 pub use openh264_codec::{OpenH264Decoder, OpenH264Encoder};
 
 /// Erros de codec.
@@ -33,6 +37,12 @@ pub enum CodecError {
     /// Erro do OpenH264.
     #[error("OpenH264: {0}")]
     OpenH264(#[from] openh264::Error),
+    /// Não há encoder de hardware nesta máquina.
+    #[error("nenhum encoder de hardware disponível")]
+    HardwareUnavailable,
+    /// Erro da API do sistema (Media Foundation, VA-API…).
+    #[error("{0}")]
+    Platform(String),
 }
 
 /// Quadro de entrada para o encoder, em BGRA sem preenchimento entre linhas.
@@ -72,12 +82,14 @@ pub struct DecodedImage {
 
 /// Codificador de vídeo.
 pub trait VideoEncoder: Send {
-    /// Codifica um quadro. Devolve `None` se o encoder decidiu pular o quadro.
+    /// Codifica um quadro e devolve, em ordem, todos os quadros codificados que
+    /// ficaram prontos (pode ser nenhum, ou mais de um num encoder com fila).
+    /// Quem chama precisa enviar todos: perder um quadro corrompe os seguintes.
     ///
     /// # Errors
     ///
     /// Retorna erro se o quadro for inválido ou o codec falhar.
-    fn encode(&mut self, frame: RawFrame<'_>) -> Result<Option<EncodedFrame>, CodecError>;
+    fn encode(&mut self, frame: RawFrame<'_>) -> Result<Vec<EncodedFrame>, CodecError>;
 
     /// Faz o próximo quadro ser um keyframe (quando um cliente entra ou perde dados).
     fn request_keyframe(&mut self);
@@ -138,7 +150,7 @@ mod tests {
             height,
             bgra: &bgra,
         };
-        let bitstream = encoder.encode(frame).unwrap().expect("primeiro quadro");
+        let bitstream = encoder.encode(frame).unwrap().remove(0);
         assert!(bitstream.keyframe);
 
         let image = decoder

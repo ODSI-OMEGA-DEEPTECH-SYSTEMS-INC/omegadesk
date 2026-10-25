@@ -96,13 +96,16 @@ fn crypto_provider() -> Arc<rustls::crypto::CryptoProvider> {
 fn transport_config() -> quinn::TransportConfig {
     let mut config = quinn::TransportConfig::default();
     config.keep_alive_interval(Some(Duration::from_secs(2)));
-    if let Ok(timeout) = Duration::from_secs(10).try_into() {
+    // 30 s, o padrão do quinn: com 10 s, perdas em rajada derrubavam a conexão.
+    if let Ok(timeout) = Duration::from_secs(30).try_into() {
         config.max_idle_timeout(Some(timeout));
     }
-    // Janela maior para quadros de vídeo grandes (keyframes de 4K).
-    config.stream_receive_window(quinn::VarInt::from_u32(16 * 1024 * 1024));
-    config.receive_window(quinn::VarInt::from_u32(32 * 1024 * 1024));
-    config.send_window(32 * 1024 * 1024);
+    // Janelas pequenas de propósito: o que não cabe aqui fica no agente, que
+    // descarta quadros e pede keyframe, em vez de acumular segundos de vídeo
+    // atrasado no buffer do QUIC. 4 MiB cabem um keyframe 4K.
+    config.stream_receive_window(quinn::VarInt::from_u32(4 * 1024 * 1024));
+    config.receive_window(quinn::VarInt::from_u32(8 * 1024 * 1024));
+    config.send_window(4 * 1024 * 1024);
     config
 }
 

@@ -1,19 +1,35 @@
 //! Laço de captura e codificação, numa thread própria (as APIs são bloqueantes).
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use omegadesk_capture::{CaptureError, Capturer, Frame};
-use omegadesk_codec::{EncoderSettings, OpenH264Encoder, RawFrame, VideoEncoder};
+use omegadesk_codec::{
+    CodecError, EncodedFrame, EncoderSettings, OpenH264Encoder, RawFrame, VideoEncoder,
+};
+use omegadesk_input::TargetDisplay;
 use omegadesk_protocol::v1::{VideoCodec, VideoFrame};
-use tokio::sync::mpsc;
+use tokio::sync::mpsc::{self, error::TrySendError};
 use tracing::{debug, info, warn};
+
+use crate::session::SessionState;
 
 /// Quanto esperar por um quadro novo antes de checar se a sessão acabou.
 const POLL: Duration = Duration::from_millis(100);
 
 /// Pausa antes de reabrir a captura depois de um erro.
-const RETRY: Duration = Duration::from_millis(500);
+const RETRY: Duration = Duration::from_millis(200);
+
+/// Qual encoder usar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum EncoderChoice {
+    /// Hardware se houver; senão, software.
+    Auto,
+    /// Só hardware (falha se não houver).
+    Hardware,
+    /// Só software (OpenH264).
+    Software,
+}
 
 fn unix_micros() -> u64 {
     SystemTime::now()
@@ -21,108 +37,207 @@ fn unix_micros() -> u64 {
         .map_or(0, |d| u64::try_from(d.as_micros()).unwrap_or(u64::MAX))
 }
 
-fn open(monitor: u32) -> Option<Box<dyn Capturer>> {
+fn open_capturer(monitor: u32, state: &SessionState) -> Option<Box<dyn Capturer>> {
     match omegadesk_capture::open_display(monitor) {
         Ok(capturer) => {
-            let (width, height) = capturer.size();
-            info!("capturando o monitor {monitor} em {width}x{height}");
+            let bounds = capturer.bounds();
+            info!(
+                "capturando o monitor {monitor}: {}x{} em ({}, {})",
+                bounds.width, bounds.height, bounds.x, bounds.y
+            );
+            state.set_target(TargetDisplay {
+                x: bounds.x,
+                y: bounds.y,
+                width: bounds.width,
+                height: bounds.height,
+            });
             Some(capturer)
         }
         Err(error) => {
-            warn!("captura indisponível: {error}");
+            debug!("captura indisponível: {error}");
             None
         }
     }
 }
 
-/// Captura, codifica e envia quadros até `stop` ou até o canal fechar.
+/// Cria o encoder para quadros de `width`x`height`.
+fn open_encoder(
+    choice: EncoderChoice,
+    width: u32,
+    height: u32,
+    settings: EncoderSettings,
+) -> Result<Box<dyn VideoEncoder>, CodecError> {
+    #[cfg(windows)]
+    if choice != EncoderChoice::Software {
+        match omegadesk_codec::MediaFoundationEncoder::new(width, height, settings) {
+            Ok(encoder) => {
+                info!("encoder de hardware: {}", encoder.name());
+                return Ok(Box::new(encoder));
+            }
+            Err(error) if choice == EncoderChoice::Hardware => return Err(error),
+            Err(error) => warn!("sem encoder de hardware ({error}); usando software"),
+        }
+    }
+    #[cfg(not(windows))]
+    if choice == EncoderChoice::Hardware {
+        return Err(CodecError::HardwareUnavailable);
+    }
+    let _ = (width, height);
+    info!("encoder de software: OpenH264");
+    Ok(Box::new(OpenH264Encoder::new(settings)?))
+}
+
+/// Encoder atual e o tamanho de quadro para o qual foi criado.
+struct ActiveEncoder {
+    encoder: Box<dyn VideoEncoder>,
+    size: (u32, u32),
+}
+
+/// Captura, codifica e envia quadros até a sessão acabar ou o canal fechar.
+#[allow(
+    clippy::too_many_lines,
+    reason = "laço principal com os casos de erro em sequência"
+)]
 pub(crate) fn run(
-    display: u32,
+    monitor: u32,
+    choice: EncoderChoice,
     settings: EncoderSettings,
     frames: &mpsc::Sender<VideoFrame>,
-    stop: &AtomicBool,
-    keyframe_requested: &AtomicBool,
+    state: &SessionState,
 ) {
-    let mut encoder = match OpenH264Encoder::new(settings) {
-        Ok(encoder) => encoder,
-        Err(error) => {
-            warn!("encoder indisponível: {error}");
-            return;
-        }
-    };
+    crate::platform::boost_current_thread();
+    let mut choice = choice;
     let mut capturer: Option<Box<dyn Capturer>> = None;
+    let mut encoder: Option<ActiveEncoder> = None;
     let mut last: Option<Frame> = None;
     let mut sequence = 0u64;
     let mut timing = Timing::default();
 
-    while !stop.load(Ordering::Relaxed) {
+    while !state.stop.load(Ordering::Relaxed) {
         let Some(active) = capturer.as_mut() else {
-            capturer = open(display);
+            capturer = open_capturer(monitor, state);
             if capturer.is_none() {
                 std::thread::sleep(RETRY);
             }
             continue;
         };
 
-        let force_keyframe = keyframe_requested.swap(false, Ordering::Relaxed);
-        if force_keyframe {
-            encoder.request_keyframe();
-        }
+        let force_keyframe = state.keyframe_requested.swap(false, Ordering::Relaxed);
 
         let frame = match active.next_frame(POLL) {
             Ok(Some(frame)) => frame,
             // Tela parada: só reenvia se o cliente pediu keyframe.
             Ok(None) => match (&last, force_keyframe) {
-                (Some(previous), true) => previous.clone(),
-                _ => continue,
+                (Some(previous), true) => {
+                    let mut resend = previous.clone();
+                    // Tempo de agora: o quadro antigo não ficou "processando".
+                    resend.captured_at = Instant::now();
+                    resend
+                }
+                (None, true) => {
+                    // Ainda não há imagem: guarda o pedido para o próximo quadro.
+                    state.keyframe_requested.store(true, Ordering::Relaxed);
+                    continue;
+                }
+                (_, false) => continue,
             },
             Err(CaptureError::AccessLost) => {
                 debug!("acesso à tela perdido; reabrindo");
                 capturer = None;
-                keyframe_requested.store(true, Ordering::Relaxed);
+                // Nunca reenviar a imagem de antes do bloqueio ou do UAC
+                // (privacidade; o CrossDesk faz o mesmo).
+                last = None;
+                state.keyframe_requested.store(true, Ordering::Relaxed);
                 continue;
             }
             Err(error) => {
                 warn!("erro de captura: {error}");
                 capturer = None;
+                last = None;
                 std::thread::sleep(RETRY);
                 continue;
             }
         };
 
+        // (Re)cria o encoder quando a resolução muda.
+        if encoder.as_ref().map(|e| e.size) != Some((frame.width, frame.height)) {
+            match open_encoder(choice, frame.width, frame.height, settings) {
+                Ok(new_encoder) => {
+                    encoder = Some(ActiveEncoder {
+                        encoder: new_encoder,
+                        size: (frame.width, frame.height),
+                    });
+                }
+                Err(error) => {
+                    warn!("encoder indisponível: {error}");
+                    std::thread::sleep(RETRY);
+                    continue;
+                }
+            }
+        }
+        let Some(active_encoder) = encoder.as_mut() else {
+            continue;
+        };
+        if force_keyframe || sequence == 0 {
+            active_encoder.encoder.request_keyframe();
+        }
+
+        let captured_at_micros = unix_micros();
         let encode_start = Instant::now();
-        let encoded = encoder.encode(RawFrame {
+        let encoded = active_encoder.encoder.encode(RawFrame {
             width: frame.width,
             height: frame.height,
             bgra: &frame.bgra,
         });
-        let host_processing = frame.captured_at.elapsed();
-        timing.record(encode_start - frame.captured_at, encode_start.elapsed());
         let encoded = match encoded {
-            Ok(Some(encoded)) => encoded,
-            Ok(None) => continue,
+            Ok(encoded) => encoded,
             Err(error) => {
-                warn!("erro de codificação: {error}");
+                // Falha do driver em plena sessão: cai para o software, como o
+                // RustDesk (`set_fallback` em `scrap/src/common/codec.rs`).
+                warn!("erro de codificação: {error}; trocando para software");
+                choice = EncoderChoice::Software;
+                encoder = None;
+                state.keyframe_requested.store(true, Ordering::Relaxed);
                 continue;
             }
         };
+        let host_processing = frame.captured_at.elapsed();
+        timing.record(encode_start - frame.captured_at, encode_start.elapsed());
 
-        sequence += 1;
-        let video_frame = VideoFrame {
-            sequence,
-            captured_at_micros: unix_micros(),
-            host_processing_micros: u32::try_from(host_processing.as_micros()).unwrap_or(u32::MAX),
-            codec: VideoCodec::H264 as i32,
-            keyframe: encoded.keyframe,
-            display_index: display,
-            width: encoded.width,
-            height: encoded.height,
-            data: encoded.data.into(),
-        };
-        last = Some(frame);
-        if frames.blocking_send(video_frame).is_err() {
-            break;
+        for EncodedFrame {
+            data,
+            keyframe,
+            width,
+            height,
+        } in encoded
+        {
+            sequence += 1;
+            let video_frame = VideoFrame {
+                sequence,
+                captured_at_micros,
+                host_processing_micros: u32::try_from(host_processing.as_micros())
+                    .unwrap_or(u32::MAX),
+                codec: VideoCodec::H264 as i32,
+                keyframe,
+                display_index: monitor,
+                width,
+                height,
+                data: data.into(),
+            };
+            match frames.try_send(video_frame) {
+                Ok(()) => {}
+                // Rede mais lenta que a captura: descarta em vez de acumular
+                // atraso, e pede keyframe porque os próximos P-frames dependem
+                // deste (Selkies e Moonlight fazem o mesmo).
+                Err(TrySendError::Full(_)) => {
+                    timing.dropped += 1;
+                    state.keyframe_requested.store(true, Ordering::Relaxed);
+                    break;
+                }
+                Err(TrySendError::Closed(_)) => return,
+            }
         }
+        last = Some(frame);
     }
 }
 
@@ -130,6 +245,7 @@ pub(crate) fn run(
 #[derive(Debug, Default)]
 struct Timing {
     frames: u32,
+    dropped: u32,
     capture: Duration,
     encode: Duration,
     since: Option<Instant>,
@@ -148,10 +264,11 @@ impl Timing {
         if elapsed >= TIMING_PERIOD {
             let ms = |d: Duration| d.as_secs_f64() * 1000.0 / f64::from(self.frames);
             info!(
-                "{:.1} quadros/s · cópia da tela {:.1} ms · codificação {:.1} ms",
+                "{:.1} quadros/s · cópia da tela {:.1} ms · codificação {:.1} ms · descartados {}",
                 f64::from(self.frames) / elapsed.as_secs_f64(),
                 ms(self.capture),
                 ms(self.encode),
+                self.dropped,
             );
             *self = Self::default();
         }

@@ -40,6 +40,20 @@ pub struct Frame {
     pub captured_at: Instant,
 }
 
+/// Posição e tamanho do monitor na área de trabalho virtual, em pixels.
+/// Monitores à esquerda ou acima do principal têm coordenadas negativas.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DisplayBounds {
+    /// Coordenada x do canto superior esquerdo.
+    pub x: i32,
+    /// Coordenada y do canto superior esquerdo.
+    pub y: i32,
+    /// Largura em pixels.
+    pub width: u32,
+    /// Altura em pixels.
+    pub height: u32,
+}
+
 /// Fonte de quadros de um monitor.
 pub trait Capturer: Send {
     /// Espera o próximo quadro até `timeout`.
@@ -54,6 +68,10 @@ pub trait Capturer: Send {
 
     /// Largura e altura do monitor capturado.
     fn size(&self) -> (u32, u32);
+
+    /// Posição do monitor na área de trabalho virtual, para o mouse remoto
+    /// cair no monitor certo.
+    fn bounds(&self) -> DisplayBounds;
 }
 
 /// Abre a captura de um monitor (0 é o principal).

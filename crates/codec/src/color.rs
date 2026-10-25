@@ -1,22 +1,66 @@
-//! Conversão de cor BGRA → I420 (YUV 4:2:0), BT.601 faixa limitada, em inteiros.
+//! Conversão de cor BGRA → YUV 4:2:0, BT.601 faixa limitada (16–235), em
+//! inteiros. É o que o decoder do OpenH264 assume em `write_rgba8`.
 
-/// Converte BGRA para I420. `width` e `height` precisam ser pares.
+/// Converte BGRA para I420 (planos Y, U e V separados).
 ///
-/// Devolve os planos `(y, u, v)`: Y com `width * height` bytes e U/V com um
-/// quarto disso cada.
+/// `source_width` é a largura da imagem BGRA; `width` e `height` (pares) são a
+/// área convertida, a partir do canto superior esquerdo. Assim uma captura com
+/// dimensão ímpar perde só a última coluna/linha.
 #[must_use]
-pub fn bgra_to_i420(bgra: &[u8], width: usize, height: usize) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
-    debug_assert!(width.is_multiple_of(2) && height.is_multiple_of(2));
-    let stride = width * 4;
+pub fn bgra_to_i420(
+    bgra: &[u8],
+    source_width: usize,
+    width: usize,
+    height: usize,
+) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     let mut y_plane = vec![0u8; width * height];
     let mut u_plane = vec![0u8; width * height / 4];
     let mut v_plane = vec![0u8; width * height / 4];
+    convert(
+        bgra,
+        source_width,
+        width,
+        height,
+        &mut y_plane,
+        |index, u, v| {
+            u_plane[index] = u;
+            v_plane[index] = v;
+        },
+    );
+    (y_plane, u_plane, v_plane)
+}
 
+/// Converte BGRA para NV12 (plano Y seguido de U/V intercalados) direto em
+/// `destination`, que precisa ter `width * height * 3 / 2` bytes.
+pub fn bgra_to_nv12(
+    bgra: &[u8],
+    source_width: usize,
+    width: usize,
+    height: usize,
+    destination: &mut [u8],
+) {
+    let (y_plane, uv_plane) = destination.split_at_mut(width * height);
+    convert(bgra, source_width, width, height, y_plane, |index, u, v| {
+        uv_plane[index * 2] = u;
+        uv_plane[index * 2 + 1] = v;
+    });
+}
+
+fn convert(
+    bgra: &[u8],
+    source_width: usize,
+    width: usize,
+    height: usize,
+    y_plane: &mut [u8],
+    mut put_chroma: impl FnMut(usize, u8, u8),
+) {
+    debug_assert!(width.is_multiple_of(2) && height.is_multiple_of(2));
+    let stride = source_width * 4;
     for row in (0..height).step_by(2) {
-        let top = &bgra[row * stride..(row + 1) * stride];
-        let bottom = &bgra[(row + 1) * stride..(row + 2) * stride];
+        let top = &bgra[row * stride..][..width * 4];
+        let bottom = &bgra[(row + 1) * stride..][..width * 4];
         let (y_top, y_bottom) = y_plane[row * width..(row + 2) * width].split_at_mut(width);
-        let uv_row = row / 2 * (width / 2);
+        let chroma_row = row / 2 * (width / 2);
 
         for col in (0..width).step_by(2) {
             let mut sum_r = 0i32;
@@ -34,12 +78,15 @@ pub fn bgra_to_i420(bgra: &[u8], width: usize, height: usize) -> (Vec<u8>, Vec<u
                     sum_b += b;
                 }
             }
-            let (r, g, b) = (sum_r / 4, sum_g / 4, sum_b / 4);
-            u_plane[uv_row + col / 2] = clamp_u8(((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128);
-            v_plane[uv_row + col / 2] = clamp_u8(((112 * r - 94 * g - 18 * b + 128) >> 8) + 128);
+            // Média dos 4 pixels com arredondamento.
+            let (r, g, b) = ((sum_r + 2) >> 2, (sum_g + 2) >> 2, (sum_b + 2) >> 2);
+            put_chroma(
+                chroma_row + col / 2,
+                clamp_u8(((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128),
+                clamp_u8(((112 * r - 94 * g - 18 * b + 128) >> 8) + 128),
+            );
         }
     }
-    (y_plane, u_plane, v_plane)
 }
 
 fn luma(r: i32, g: i32, b: i32) -> u8 {
@@ -52,17 +99,17 @@ fn clamp_u8(value: i32) -> u8 {
 
 #[cfg(test)]
 mod tests {
-    use super::bgra_to_i420;
+    use super::{bgra_to_i420, bgra_to_nv12};
 
     #[test]
     fn black_and_white() {
         let white = [255u8; 2 * 2 * 4];
-        let (y, u, v) = bgra_to_i420(&white, 2, 2);
+        let (y, u, v) = bgra_to_i420(&white, 2, 2, 2);
         assert!(y.iter().all(|&l| l == 235));
         assert_eq!((u[0], v[0]), (128, 128));
 
         let black = [0u8, 0, 0, 255].repeat(4);
-        let (y, u, v) = bgra_to_i420(&black, 2, 2);
+        let (y, u, v) = bgra_to_i420(&black, 2, 2, 2);
         assert!(y.iter().all(|&l| l == 16));
         assert_eq!((u[0], v[0]), (128, 128));
     }
@@ -70,7 +117,35 @@ mod tests {
     #[test]
     fn plane_sizes() {
         let frame = vec![0u8; 8 * 4 * 4];
-        let (y, u, v) = bgra_to_i420(&frame, 8, 4);
+        let (y, u, v) = bgra_to_i420(&frame, 8, 8, 4);
         assert_eq!((y.len(), u.len(), v.len()), (32, 8, 8));
+    }
+
+    #[test]
+    fn nv12_matches_i420() {
+        let (width, height) = (6, 4);
+        let bgra: Vec<u8> = (0..width * height * 4)
+            .map(|i| u8::try_from(i * 37 % 256).unwrap())
+            .collect();
+        let (y, u, v) = bgra_to_i420(&bgra, width, width, height);
+        let mut nv12 = vec![0u8; width * height * 3 / 2];
+        bgra_to_nv12(&bgra, width, width, height, &mut nv12);
+        assert_eq!(&nv12[..y.len()], &y[..]);
+        let interleaved: Vec<u8> = u.iter().zip(&v).flat_map(|(a, b)| [*a, *b]).collect();
+        assert_eq!(&nv12[y.len()..], &interleaved[..]);
+    }
+
+    #[test]
+    fn crops_odd_source() {
+        // Imagem 3x2: só as 2 primeiras colunas entram.
+        let mut bgra = [0u8; 3 * 2 * 4].to_vec();
+        for row in 0..2 {
+            bgra[(row * 3 + 2) * 4..][..4].copy_from_slice(&[255, 255, 255, 255]);
+        }
+        let (y, _, _) = bgra_to_i420(&bgra, 3, 2, 2);
+        assert!(
+            y.iter().all(|&l| l == 16),
+            "a coluna branca descartada vazou"
+        );
     }
 }
