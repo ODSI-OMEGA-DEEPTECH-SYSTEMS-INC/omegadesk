@@ -98,9 +98,7 @@ impl DxgiCapturer {
                 context.ok_or_else(|| CaptureError::Os("D3D11 sem contexto".into()))?;
 
             let output: IDXGIOutput1 = output.cast().map_err(|e| os_error(&e))?;
-            let duplication = output
-                .DuplicateOutput(&device)
-                .map_err(|e| os_error(&e))?;
+            let duplication = output.DuplicateOutput(&device).map_err(|e| os_error(&e))?;
             let description = duplication.GetDesc();
 
             Ok(Self {

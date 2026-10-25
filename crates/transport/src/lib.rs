@@ -152,9 +152,7 @@ pub async fn connect(
     let mut tls = rustls::ClientConfig::builder_with_provider(provider.clone())
         .with_protocol_versions(&[&rustls::version::TLS13])?
         .dangerous()
-        .with_custom_certificate_verifier(Arc::new(pinned::PinnedVerifier::new(
-            expected, provider,
-        )))
+        .with_custom_certificate_verifier(Arc::new(pinned::PinnedVerifier::new(expected, provider)))
         .with_no_client_auth();
     tls.alpn_protocols = vec![ALPN.to_vec()];
 
